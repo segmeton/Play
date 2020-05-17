@@ -64,12 +64,17 @@ public static class MidiUtils
         return midiNote % 12;
     }
 
-    public static int GetRoundedMidiNote(int midiNote, int midiCents, int resolution)
+    public static int GetRoundedMidiNote(int recordedMidiNote, int targetMidiNote, int roundingDistance)
     {
-        int accurateMidiNote = (midiNote * 100) + midiCents;
-        int accurateRoundedMidiNote = accurateMidiNote % resolution;
-        int roundedMidiNote = accurateRoundedMidiNote / 100;
-        return roundedMidiNote;
+        int distance = MidiUtils.GetRelativePitchDistance(recordedMidiNote, targetMidiNote);
+        if (distance <= roundingDistance)
+        {
+            return targetMidiNote;
+        }
+        else
+        {
+            return recordedMidiNote;
+        }
     }
 
     public static int GetRelativePitchDistance(int fromMidiNote, int toMidiNote)
@@ -113,6 +118,32 @@ public static class MidiUtils
     public static bool IsWhitePianoKey(int midiNote)
     {
         return whiteKeyRelativeMidiNotes.Contains(GetRelativePitch(midiNote));
+    }
+
+    public static int GetRoundedMidiNoteForRecordedMidiNote(Note targetNote, int recordedMidiNote, int roundingDistance)
+    {
+        if (targetNote.Type == ENoteType.Rap || targetNote.Type == ENoteType.RapGolden)
+        {
+            // Rap notes accept any noise as correct note.
+            return targetNote.MidiNote;
+        }
+        else if (recordedMidiNote < MidiUtils.SingableNoteMin || recordedMidiNote > MidiUtils.SingableNoteMax)
+        {
+            // The pitch detection can fail, which is the case when the detected pitch is outside of the singable note range.
+            // In this case, just assume that the player was singing correctly and round to the target note.
+            return targetNote.MidiNote;
+        }
+        else
+        {
+            // Round recorded note if it is close to the target note.
+            return GetRoundedMidiNote(recordedMidiNote, targetNote.MidiNote, roundingDistance);
+        }
+    }
+
+    public static bool IsNoteHit(Note targetNote, PitchEvent pitchEvent, int roundingDistance)
+    {
+        return pitchEvent != null
+            && GetRelativePitch(targetNote.MidiNote) == GetRelativePitch(GetRoundedMidiNoteForRecordedMidiNote(targetNote, pitchEvent.MidiNote, roundingDistance));
     }
 
     public static float[] PrecalculateHalftoneFrequencies(int noteMin, int noteRange)

@@ -44,7 +44,7 @@ public partial class PlayerPitchTracker : MonoBehaviour, INeedInjection
     public Sentence RecordingSentence { get; private set; }
     private List<Note> currentAndUpcomingNotesInRecordingSentence;
 
-    private IAudioSamplesAnalyzer audioSamplesAnalyzer;
+    private SlicedAudioSamplesAnalyzerTowardsTargetNote slicedAudioSamplesAnalyzer;
 
     private bool hasJoker;
 
@@ -87,8 +87,9 @@ public partial class PlayerPitchTracker : MonoBehaviour, INeedInjection
         if (micProfile != null)
         {
             roundingDistance = playerProfile.Difficulty.GetRoundingDistance();
-            audioSamplesAnalyzer = MicPitchTracker.CreateAudioSamplesAnalyzer(settings.AudioSettings.pitchDetectionAlgorithm, micSampleRecorder.SampleRateHz);
+            IAudioSamplesAnalyzer audioSamplesAnalyzer = MicPitchTracker.CreateAudioSamplesAnalyzer(settings.AudioSettings.pitchDetectionAlgorithm, micSampleRecorder.SampleRateHz);
             audioSamplesAnalyzer.Enable();
+            slicedAudioSamplesAnalyzer = new SlicedAudioSamplesAnalyzerTowardsTargetNote(512, audioSamplesAnalyzer);
             micSampleRecorder.MicProfile = micProfile;
             micSampleRecorder.StartRecording();
         }
@@ -124,7 +125,7 @@ public partial class PlayerPitchTracker : MonoBehaviour, INeedInjection
                 ? currentOrUpcomingNote
                 : null;
 
-            PitchEvent pitchEvent = audioSamplesAnalyzer.ProcessAudioSamples(micSampleRecorder.MicSamples, startSampleBufferIndex, endSampleBufferIndex, micProfile);
+            PitchEvent pitchEvent = slicedAudioSamplesAnalyzer.ProcessAudioSamples(micSampleRecorder.MicSamples, startSampleBufferIndex, endSampleBufferIndex, micProfile, noteAtBeat, roundingDistance);
             FirePitchEvent(pitchEvent, BeatToAnalyze, noteAtBeat);
 
             GoToNextBeat();
@@ -160,7 +161,7 @@ public partial class PlayerPitchTracker : MonoBehaviour, INeedInjection
     public void FirePitchEvent(PitchEvent pitchEvent, int beat, Note noteAtBeat)
     {
         int roundedMidiNote = pitchEvent != null
-            ? GetRoundedMidiNoteForRecordedMidiNote(noteAtBeat, pitchEvent.MidiNote)
+            ? MidiUtils.GetRoundedMidiNoteForRecordedMidiNote(noteAtBeat, pitchEvent.MidiNote, roundingDistance)
             : -1;
         int roundedMidiNoteAfterJoker = ApplyJokerRule(pitchEvent, roundedMidiNote, noteAtBeat);
 
@@ -249,39 +250,6 @@ public partial class PlayerPitchTracker : MonoBehaviour, INeedInjection
         if (micProfile != null)
         {
             micSampleRecorder.StopRecording();
-        }
-    }
-
-    private int GetRoundedMidiNoteForRecordedMidiNote(Note targetNote, int recordedMidiNote)
-    {
-        if (targetNote.Type == ENoteType.Rap || targetNote.Type == ENoteType.RapGolden)
-        {
-            // Rap notes accept any noise as correct note.
-            return targetNote.MidiNote;
-        }
-        else if (recordedMidiNote < MidiUtils.SingableNoteMin || recordedMidiNote > MidiUtils.SingableNoteMax)
-        {
-            // The pitch detection can fail, which is the case when the detected pitch is outside of the singable note range.
-            // In this case, just assume that the player was singing correctly and round to the target note.
-            return targetNote.MidiNote;
-        }
-        else
-        {
-            // Round recorded note if it is close to the target note.
-            return GetRoundedMidiNote(recordedMidiNote, targetNote.MidiNote, roundingDistance);
-        }
-    }
-
-    private int GetRoundedMidiNote(int recordedMidiNote, int targetMidiNote, int roundingDistance)
-    {
-        int distance = MidiUtils.GetRelativePitchDistance(recordedMidiNote, targetMidiNote);
-        if (distance <= roundingDistance)
-        {
-            return targetMidiNote;
-        }
-        else
-        {
-            return recordedMidiNote;
         }
     }
 

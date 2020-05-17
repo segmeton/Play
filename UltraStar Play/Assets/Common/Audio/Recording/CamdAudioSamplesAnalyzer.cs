@@ -20,12 +20,32 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
     private readonly float[] correlation = new float[NumHalftones];
 
     private readonly CamdPitchCandidate[] currentCandidates = new CamdPitchCandidate[3];
-    private readonly CircularBuffer<CamdPitchCandidate> candidateHistory = new CircularBuffer<CamdPitchCandidate>(2);
+    private CircularBuffer<CamdPitchCandidate> candidateHistory;
 
     // The best candidate from the currentCandidates and candidateHistory
     private CamdPitchCandidate bestCandidate;
     // The best candidate from the currentCandidates only
     private CamdPitchCandidate bestCurrentCandidate;
+
+    public int CandidateHistoryLength
+    {
+        get
+        {
+            if (candidateHistory == null)
+            {
+                return 0;
+            }
+            return candidateHistory.Capacity;
+        }
+        set
+        {
+            if (value == 0)
+            {
+                candidateHistory = null;
+            }
+            candidateHistory = new CircularBuffer<CamdPitchCandidate>(value);
+        }
+    }
 
     // Factor in range 0 to 1, where 0 means "no bias" and 1 means "full bias".
     // The factor is used to reduce the normalizedError of a current candidate
@@ -93,7 +113,8 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
             // But do not re-insert candidates from the history back to the history.
             // Otherwise a candidate with 0 error could dominate forever.
             int bestCurrentCandidateMidiNote = bestCurrentCandidate.halftone + MinNote;
-            if (MidiUtils.SingableNoteMin < bestCurrentCandidateMidiNote
+            if (candidateHistory != null
+                && MidiUtils.SingableNoteMin < bestCurrentCandidateMidiNote
                 && bestCurrentCandidateMidiNote < MidiUtils.SingableNoteMax)
             {
                 candidateHistory.PushFront(new CamdPitchCandidate(bestCurrentCandidate));
@@ -114,7 +135,7 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
             // However, if a new pitch has been clearly identified with significantly less normalizedError,
             // then an old detected pitch from the history will not be used instead because its normalizedError will still be less - even without bias.
             currentCandidate.normalizedErrorWithBias = currentCandidate.normalizedError;
-            if (HalftoneContinuationBias >= 0 && HalftoneContinuationBias <= 1)
+            if (bestCandidateHistory != null && HalftoneContinuationBias > 0 && HalftoneContinuationBias <= 1)
             {
                 for (int historyIndex = 0; historyIndex < bestCandidateHistory.Size; historyIndex++)
                 {
@@ -139,16 +160,19 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
         });
 
         CamdPitchCandidate bestHistoryCandidate = null;
-        for (int i = 0; i < bestCandidateHistory.Size; i++)
+        if (bestCandidateHistory != null)
         {
-            // Do not consider the biased error when comparing best candidate from history.
-            CamdPitchCandidate historyCandidate = bestCandidateHistory[i];
-            if (historyCandidate.halftone >= 0
-                && (bestHistoryCandidate == null
-                    || bestHistoryCandidate.halftone < 0
-                    || historyCandidate.normalizedError < bestHistoryCandidate.normalizedError))
+            for (int i = 0; i < bestCandidateHistory.Size; i++)
             {
-                bestHistoryCandidate = historyCandidate;
+                // Do not consider the biased error when comparing best candidate from history.
+                CamdPitchCandidate historyCandidate = bestCandidateHistory[i];
+                if (historyCandidate.halftone >= 0
+                    && (bestHistoryCandidate == null
+                        || bestHistoryCandidate.halftone < 0
+                        || historyCandidate.normalizedError < bestHistoryCandidate.normalizedError))
+                {
+                    bestHistoryCandidate = historyCandidate;
+                }
             }
         }
 
@@ -167,10 +191,10 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
         // and it is relatively bigger when all candidates have similar error values.
         float errorSum = 0;
         currentCandidates.ForEach(candidate => errorSum += candidate.error);
-        bestCandidateHistory.ForEach(candidate => errorSum += candidate.error);
+        bestCandidateHistory?.ForEach(candidate => errorSum += candidate.error);
 
         currentCandidates.ForEach(candidate => candidate.normalizedError = candidate.error / errorSum);
-        bestCandidateHistory.ForEach(candidate => candidate.normalizedError = candidate.error / errorSum);
+        bestCandidateHistory?.ForEach(candidate => candidate.normalizedError = candidate.error / errorSum);
     }
 
     private void FindCurrentCandidates(float[] correlation, CamdPitchCandidate[] candidates)
@@ -220,7 +244,7 @@ public class CamdAudioSamplesAnalyzer : AbstractAudioSamplesAnalyzer
 
     private void OnNoPitchDetected()
     {
-        candidateHistory.Clear();
+        candidateHistory?.Clear();
     }
 
     private class CamdPitchCandidate
